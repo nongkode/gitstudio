@@ -1,3 +1,4 @@
+// Modified for the nongkode/gitstudio fork: extension actions / commit steps (see src/contrib/extensionActions.ts).
 import "./l10n";
 import * as vscode from "vscode";
 import { notice } from "./ui/notify";
@@ -94,6 +95,7 @@ import {
 import { registerPrFeature } from "./pr/prFeature";
 import { promptConfirm, promptPick, registerDialogHost } from "./ui/dialogs";
 import * as l10n from "@vscode/l10n";
+import { extensionActions, type ExtensionActionsApi } from "./contrib/extensionActions";
 
 // GitStudio extension entry point.
 //
@@ -112,6 +114,8 @@ import * as l10n from "@vscode/l10n";
  */
 export interface GitStudioApi {
   readonly mergePeer: MergePeerApi;
+  /** Buttons and commit steps other extensions contribute (contrib/extensionActions). */
+  readonly actions: ExtensionActionsApi;
 }
 
 export function activate(context: vscode.ExtensionContext): GitStudioApi {
@@ -197,7 +201,9 @@ export function activate(context: vscode.ExtensionContext): GitStudioApi {
       // Merge Studio's default diff viewer too.
       ownsDiff: isOwnDiff,
     },
+    actions: extensionActions.api,
   };
+  context.subscriptions.push(extensionActions.start());
 
   // RepoManager.create activates vscode.git; do it off the activation path so a
   // slow git extension never blocks startup. The views attach as soon as it

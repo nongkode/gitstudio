@@ -1,3 +1,4 @@
+// Modified for the nongkode/gitstudio fork: extension actions / commit steps (see src/contrib/extensionActions.ts).
 import * as vscode from "vscode";
 import { failed, NO_REPOSITORY, notifyCopied } from "../ui/notify";
 import { relativeTime } from "../util/relativeTime";
@@ -18,6 +19,7 @@ import { repoName as repoNameOf, switchRepository, workspacePathOf } from "../gi
 import { pruneOnFetch } from "../git/fetchOptions";
 import { Arrival } from "../ui/arrival";
 import * as l10n from "@vscode/l10n";
+import { extensionActions } from "../contrib/extensionActions";
 
 /**
  * One change of a file, as the Changes list shows it.
@@ -221,13 +223,16 @@ interface FromWebview {
     | "stashOpenFile"
     | "stashOpenAll"
     | "stashReadFiles"
-    | "dialogResult";
+    | "dialogResult"
+    | "extAction";
   /**
    * A full sha: the stash (stashAct, stashFiles, stashOpenFile, stashOpenAll,
    * stashReadFiles), or the push review's commit (pushCommitFiles,
    * openPushCommitFile).
    */
   sha?: string;
+  /** extAction: the contributed action's id (contrib/extensionActions). */
+  actionId?: string;
   /** operation: which verb the banner's button asked for. */
   verb?: "continue" | "skip" | "abort";
   /** Correlation id for a `dialogResult` reply (see DialogHost below). */
@@ -453,6 +458,8 @@ export class CommitViewProvider
     private readonly merge?: ChangesMergeHooks,
   ) {
     this.disposables.push(this.repos.onDidChange(() => void this.pushState()));
+    // Buttons other extensions contribute (contrib/extensionActions).
+    this.disposables.push(extensionActions.onDidChange(() => this.postExtActions()));
     // The staging model is a setting, and the toolbar toggle is a shortcut to
     // it. Without this, changing it in the Settings UI leaves the view showing
     // the other model until something unrelated happens to refresh it.
@@ -599,6 +606,7 @@ export class CommitViewProvider
     );
     view.onDidChangeVisibility(() => {
       if (view.visible) {
+        extensionActions.viewShown();
         // Re-scan, not just re-push: "leave the view and come back" was the
         // workaround people found for the stale list (issue #17), so of all the
         // paths this is the one that must actually be true when it returns.
@@ -821,6 +829,14 @@ export class CommitViewProvider
       case "openGraph":
         await vscode.commands.executeCommand("gitstudio.showCommitGraph");
         return;
+      case "extAction": {
+        const active = this.repos.getActive();
+        await extensionActions.run(msg.actionId ?? "", {
+          repoRoot: active?.root,
+          workspaceFolder: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+        });
+        return;
+      }
       case "switchRepo":
         // The header's repository control — the same picker as the palette's
         // Switch Repository…, answered in this view's own dialog.
@@ -1727,6 +1743,25 @@ export class CommitViewProvider
       }
     }
 
+    // Steps other extensions run before a commit (contrib/extensionActions),
+    // e.g. exporting a project and staging the export. They may stage more
+    // files, change the message, ask for a push, or cancel.
+    let commitMessage = message;
+    if (extensionActions.hasCommitHandlers) {
+      const step = await extensionActions.beforeCommit({
+        repoRoot: entry.root,
+        message,
+        amend: !!msg.amend,
+        push: !!msg.push,
+      });
+      if (!step) {
+        void this.view?.webview.postMessage({ type: "commitDone", ok: false });
+        return;
+      }
+      commitMessage = step.message;
+      msg.push = step.push;
+    }
+
     this.busy = true;
     void this.pushState();
     try {
@@ -1735,7 +1770,7 @@ export class CommitViewProvider
       // commit (already reachable via the normal Undo / reflog), so it runs
       // directly.
       const doCommit = () =>
-        entry.ctx.staging.commit(message, {
+        entry.ctx.staging.commit(commitMessage, {
           amend: msg.amend,
           signoff: msg.signoff,
           author: msg.author?.trim() || undefined,
@@ -2731,6 +2766,11 @@ export class CommitViewProvider
    * onDidChange firehose can request many per second). Amend pushes are
    * user-initiated and always run immediately so the prefill isn't dropped.
    */
+  /** Sends the contributed buttons (contrib/extensionActions) to the page. */
+  private postExtActions(): void {
+    void this.view?.webview.postMessage({ type: "extActions", items: extensionActions.rendered() });
+  }
+
   private async pushState(amend = false): Promise<void> {
     if (amend) {
       await this.doPushState(true);
@@ -2939,6 +2979,12 @@ export class CommitViewProvider
     };
     void this.view.webview.postMessage(base);
     this.updateBadge(staged, unstaged, behind);
+    extensionActions.setFacts({
+      hasRepo,
+      hasChanges: merge.length + staged.length + unstaged.length > 0,
+      hasStaged: staged.length > 0,
+    });
+    this.postExtActions();
 
     // THEN resolve the slower bits — the AI availability (cached; see
     // AiFeatures.isEnabledCached) and the branch-menu data (for-each-ref + stash
@@ -4803,6 +4849,12 @@ export class CommitViewProvider
     #no-repo .badge .codicon { font-size: 22px; }
     #no-repo .et { font-size: 14px; font-weight: 600; color: var(--gs-fg); }
     #no-repo .es { font-size: 12px; line-height: 1.5; color: var(--gs-fg-muted); max-width: 260px; }
+    .ext-slot { display: contents; }
+    .ext-slot.ext-commit { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .ext-slot.ext-commit:empty { display: none; }
+    .ext-slot.ext-commit > .gs-commit { flex: 1 1 auto; }
+    .ext-badge { margin-left: 4px; padding: 0 5px; border-radius: 8px; font-size: 10px; line-height: 16px;
+      background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
     #no-repo .no-repo-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 12px; }
     /* When no repo is open, the composer + change list are irrelevant — show
        only the onboarding. */
@@ -5197,6 +5249,7 @@ export class CommitViewProvider
       <span id="main-label">${l10n.t("Commit & Push")}</span>
     </button>
   </div>
+  <div class="ext-slot ext-commit" data-slot="commit"></div>
   </div>
 
   <div class="changes-toolbar">
@@ -5204,6 +5257,7 @@ export class CommitViewProvider
     <span class="changes-total" id="changes-total">0</span>
     <span class="toolbar-spacer"></span>
     <span class="toolbar-actions">
+      <span class="ext-slot" data-slot="toolbar"></span>
       <button class="icon-btn layout" id="layout-toggle" type="button"
         title="${l10n.t("View as Tree")}" aria-label="${l10n.t("View as Tree")}">
         <i class="codicon codicon-list-tree to-tree" aria-hidden="true"></i>
@@ -5289,6 +5343,7 @@ export class CommitViewProvider
         <i class="codicon codicon-git-commit" aria-hidden="true"></i>
         <span>${l10n.t("Commit Graph")}</span>
       </button>
+      <span class="ext-slot" data-slot="noRepo"></span>
     </div>
   </div>
 
@@ -11245,8 +11300,50 @@ export class CommitViewProvider
     }
 
     // ---- Host messages ---------------------------------------------------
+    // Buttons other extensions contribute (contrib/extensionActions.ts).
+    function renderExtActions(items) {
+      document.querySelectorAll(".ext-slot").forEach(function (slot) {
+        while (slot.firstChild) slot.removeChild(slot.firstChild);
+      });
+      (items || []).forEach(function (a) {
+        const slot = document.querySelector('.ext-slot[data-slot="' + a.slot + '"]');
+        if (!slot) return;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = a.slot === "toolbar" ? "icon-btn ext-action" : "gs-commit ext-action " + (a.style === "primary" ? "primary" : "split");
+        btn.title = a.tooltip || a.label;
+        btn.setAttribute("aria-label", a.label);
+        if (a.disabled) btn.disabled = true;
+        if (a.icon) {
+          const i = document.createElement("i");
+          i.className = "codicon codicon-" + a.icon + (a.slot === "toolbar" ? "" : " glyph");
+          i.setAttribute("aria-hidden", "true");
+          btn.appendChild(i);
+        }
+        if (a.slot !== "toolbar" || !a.icon) {
+          const t = document.createElement("span");
+          t.textContent = a.label;
+          btn.appendChild(t);
+        }
+        if (a.badge) {
+          const b = document.createElement("span");
+          b.className = "ext-badge";
+          b.textContent = a.badge;
+          btn.appendChild(b);
+        }
+        btn.addEventListener("click", function () {
+          vscode.postMessage({ type: "extAction", actionId: a.id });
+        });
+        slot.appendChild(btn);
+      });
+    }
+
     window.addEventListener("message", (event) => {
       const msg = event.data;
+      if (msg.type === "extActions") {
+        renderExtActions(msg.items);
+        return;
+      }
       if (msg.type === "dialog") {
         // A host-side command needs an answer. It is awaiting our
         // "dialogResult" reply, so every close path must post exactly once —
