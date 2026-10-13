@@ -59,11 +59,8 @@ The extension id stays `gitstudio.gitstudio`: after installing the fork's vsix
 keep **Auto Update off** for GitStudio (a vsix install is pinned already), or
 the Marketplace build replaces it.
 
-On the owner's PC: the `GitStudio fork\` folder in the owner's tools folder
-(`patches\*.patch` = the fork commits, `build.bat`, `push.bat` with logs).
-`push.bat` resets the branch to `origin/main` + the patches and force-pushes,
-so commit changes as patches there or push from a clone and refresh the
-patches with `git format-patch origin/main`.
+On the owner's PC: the clone in `C:\Users\VM\Desktop\VS Code Tools\`. Work only
+there; other folders on the Desktop belong to other projects.
 
 ## Ideas not done yet
 
