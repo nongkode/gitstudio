@@ -40,3 +40,8 @@ what otherwise takes several greps and file reads:
 Free-text `graphify query "…"` matches keywords and is noisy here (tests
 dominate); prefer the symbol commands above, then grep. Function names take
 `()`; methods are `.name()`.
+
+## Fork notes
+
+This is the nongkode/gitstudio fork: read `FORK.md` for what the fork adds
+(extension point for other extensions), how it is built and where it lives.
