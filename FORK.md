@@ -49,11 +49,21 @@ Users of the extension point: Git Starter
 
 ## Build / install
 
-`npm ci --ignore-scripts -w apps/extension --include-workspace-root`, then in
-`apps/extension`: `npm run check-types`, `npm run package`,
-`npx @vscode/vsce package --no-dependencies`. (Full `npm ci` without
-`--ignore-scripts` pulls electron etc. for the desktop app and is not needed
-for the extension.) Built OK (ext 1.19.0, upstream v2.6.0 7192ca7), check-types clean.
+`npm ci --ignore-scripts -w apps/extension --include-workspace-root`, then
+`node scripts/fork-pack.js [outdir]`: stamps the version, runs `npm run
+check-types`, `npm run package` and `npx @vscode/vsce package --no-dependencies`
+in `apps/extension`, writes `gitstudio-<version>.vsix` and undoes the stamp.
+(Full `npm ci` without `--ignore-scripts` pulls electron etc. for the desktop
+app and is not needed for the extension.) Built OK on upstream ext 1.19.0
+(upstream v2.6.0 7192ca7), check-types clean.
+
+**Version of a fork build: `yy.mdd.hmm`** (Bangkok time, no leading zeros,
+e.g. `26.1015.1251`), the same scheme as Git Starter and TIA Portal Tools. It
+is always above the Marketplace version, so VS Code never replaces the fork
+with the Marketplace build. Never build a release with upstream's version.
+A GitHub Release of the fork: tag and title = that version, the vsix attached
+(`gh release create <ver> <vsix> --repo nongkode/gitstudio`; always pass
+`--repo`, the clone also knows upstream).
 
 The extension id stays `gitstudio.gitstudio`: after installing the fork's vsix
 keep **Auto Update off** for GitStudio (a vsix install is pinned already), or
